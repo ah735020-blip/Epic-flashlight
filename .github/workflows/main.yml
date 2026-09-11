@@ -1,1 +1,224 @@
 
+name: Build Flashlight APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create Android project
+        run: |
+          mkdir -p app/src/main/java/com/example/flashlight
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FlashlightApp"
+          include(":app")
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.6.1' apply false
+              id 'org.jetbrains.kotlin.android' version '2.0.20' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+
+          android {
+              namespace 'com.example.flashlight'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId "com.example.flashlight"
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName "1.0"
+              }
+          }
+
+          kotlin {
+              jvmToolchain(17)
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.CAMERA" />
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="Flashlight">
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="portrait"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+                  <item name="android:statusBarColor">#090A0D</item>
+                  <item name="android:navigationBarColor">#090A0D</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:gravity="center"
+              android:orientation="vertical"
+              android:background="#090A0D">
+
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="FLASHLIGHT"
+                  android:textColor="#FFFFFF"
+                  android:textSize="26sp"
+                  android:textStyle="bold"
+                  android:layout_marginBottom="40dp"/>
+
+              <Button
+                  android:id="@+id/torchButton"
+                  android:layout_width="220dp"
+                  android:layout_height="220dp"
+                  android:text="🔦"
+                  android:textSize="80sp"
+                  android:backgroundTint="#FFFFFF"/>
+
+              <TextView
+                  android:id="@+id/status"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="OFF"
+                  android:textColor="#FFFFFF"
+                  android:textSize="20sp"
+                  android:layout_marginTop="30dp"/>
+
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="Developer: ARMAN"
+                  android:textColor="#777A82"
+                  android:textSize="13sp"
+                  android:layout_marginTop="25dp"/>
+          </LinearLayout>
+          EOF
+
+          cat > app/src/main/java/com/example/flashlight/MainActivity.kt <<'EOF'
+          package com.example.flashlight
+
+          import android.content.Context
+          import android.hardware.camera2.CameraCharacteristics
+          import android.hardware.camera2.CameraManager
+          import android.os.Bundle
+          import android.widget.Button
+          import android.widget.TextView
+          import android.widget.Toast
+          import androidx.activity.ComponentActivity
+
+          class MainActivity : ComponentActivity() {
+              private var manager: CameraManager? = null
+              private var cameraId: String? = null
+              private var on = false
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                  cameraId = manager?.cameraIdList?.firstOrNull {
+                      manager?.getCameraCharacteristics(it)
+                          ?.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                  }
+
+                  val button = findViewById<Button>(R.id.torchButton)
+                  val status = findViewById<TextView>(R.id.status)
+
+                  button.setOnClickListener {
+                      try {
+                          on = !on
+                          manager?.setTorchMode(cameraId!!, on)
+                          status.text = if (on) "ON" else "OFF"
+                      } catch (e: Exception) {
+                          on = false
+                          status.text = "OFF"
+                          Toast.makeText(this, "Flashlight unavailable", Toast.LENGTH_SHORT).show()
+                      }
+                  }
+              }
+
+              override fun onDestroy() {
+                  if (on) {
+                      try { manager?.setTorchMode(cameraId!!, false) } catch (_: Exception) {}
+                  }
+                  super.onDestroy()
+              }
+          }
+          EOF
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flashlight-ARMAN-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
